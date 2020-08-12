@@ -127,3 +127,18 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# ADDED BY ME
+data/internal/*
+!data/internal/.gitkeep 
+data/external/*
+!data/external/.gitkeep
+models/*
+!models/.gitkeep
+share/
+pyvenv.cfg
+.vscode/
+bin/
+lib64
+etc/
+
