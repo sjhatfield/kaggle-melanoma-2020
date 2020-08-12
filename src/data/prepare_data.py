@@ -251,7 +251,7 @@ class MelanomaDataset(Dataset):
 
 
 def format_tabular(
-    train_raw: pd.DataFrame, test_raw: pd.DataFrame = None
+    train_raw: pd.DataFrame, test_raw: pd.DataFrame = None, count: bool = False,
 ) -> (pd.DataFrame, pd.DataFrame):
     """
     Takes in the dataframes containing all metadata and dummifies the categories and removes the
@@ -264,6 +264,10 @@ def format_tabular(
     train.loc[:, "sex"].fillna(-1, inplace=True)
     train_dummies = pd.get_dummies(data=train_raw["anatom_site_general_challenge"])
     train = pd.concat([train, train_dummies], axis=1)
+    if count:
+        train["patient_count"] = train_raw["patient_id"].map(
+            train_raw["patient_id"].value_counts()
+        )
 
     if type(test_raw) == pd.DataFrame:
         test_raw.loc[:, "age_approx"].fillna(0, inplace=True)
@@ -273,6 +277,10 @@ def format_tabular(
         test.loc[:, "sex"].fillna(-1, inplace=True)
         test_dummies = pd.get_dummies(data=test_raw["anatom_site_general_challenge"])
         test = pd.concat([test, test_dummies], axis=1)
+        if count:
+            test["patient_count"] = test_raw["patient_id"].map(
+                test_raw["patient_id"].value_counts()
+            )
 
         return train, test, train_raw["target"]
 

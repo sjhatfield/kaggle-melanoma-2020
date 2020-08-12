@@ -18,3 +18,4 @@ def grid_show(
         image = Image.open(img_path)
         fig.add_subplot(rows, columns, i)
         plt.imshow(image)
+    return fig
