@@ -14,10 +14,14 @@ class UniformAugment:
     Contains a number of image augmentations that may be chosen
     uniformly at random during training and testing. The default
     fill color is grey
+    :param operation: number of augmentations to be performed
+    :param fillcolor: RGB tuple
     """
 
     def __init__(self, operations: int = 2, fillcolor: tuple = (128, 128, 128)):
         self.operations = operations
+        # These are the ranges of possible values for each of the augmentations
+        # A range of [0, 0] means the augmentation has no value, it just happens
         self.augs = {
             "shearX": [-0.3, 0.3],
             "shearY": [-0.3, 0.3],
@@ -36,21 +40,20 @@ class UniformAugment:
             "cutout": [0, 0.2],
         }
 
-        def rotate_with_fill(img: PIL.Image, degrees: float):
+        def rotate_with_fill(img: PIL.Image, degrees: float) -> PIL.Image:
             """
-            Rotates the image by magnitude (degrees counter 
-            clockwise) and then fills the gaps with defaul
-            color
+            :param img: the image in PIL format
+            :param degrees: degrees counter clockwise to be rotated
             """
             rot = img.convert("RGBA").rotate(degrees)
             return Image.composite(
                 rot, Image.new("RGBA", rot.size, (128,) * 4), rot
             ).convert(img.mode)
 
-        def cutout(img, magnitude: float, fillcolor: tuple):
+        def cutout(img, magnitude: float, fillcolor: tuple) -> PIL.Image:
             """
-            Cuts out a square from the image and fills 
-            with the default color
+            :param magnitude: the  percentage as a decimal that will be cut out
+            :param fillcolor: RGB tuple
             """
             img = img.copy()
             w, h = img.size
@@ -111,7 +114,7 @@ class UniformAugment:
             ),
         }
 
-    def __call__(self, img):
+    def __call__(self, img: PIL.Image) -> PIL.Image:
         """
         Select a random sample of augmentations where 
         self.operations determines how many and perform them
@@ -144,6 +147,14 @@ class ImageTransform:
         std: tuple = (0.229, 0.224, 0.225),  # ImageNet
         train: bool = True,
     ):
+        """
+        :param resize: integer giving the square side length in pixels of resized image
+        :param uniform_augment: above class of UniformAugment
+        :param mean: normalization mean where the default is ImageNet mean
+        :param std: standard deviation where the defaulr is ImageNet
+        :param train: bool indicating where this is a training dataset because validation
+            would not augment
+        """
         self.data_transform = {
             "train": transforms.Compose(
                 [
@@ -171,7 +182,8 @@ class ImageTransform:
             self.data_transform["train"].transforms.insert(0, UniformAugment())
             self.data_transform["test"].transforms.insert(0, UniformAugment())
 
-    def __call__(self, img, phase):
+    def __call__(self, img: PIL.Image, phase: bool):
+        # Performs the transformations of the image
         return self.data_transform[phase](img=img)
 
 
@@ -180,61 +192,44 @@ class MelanomaDataset(Dataset):
         self,
         base_dir: str,
         info_dataframe: pd.DataFrame,
-        transform=None,
+        transform: UniformAugment = None,
         phase: str = "train",
+        external_base_dir: str = None,
     ):
+        """
+        :param base_dir: this is the directory that the images 
+            contained in the dataframe will be found in
+        :param info_dataframe: the dataframe containing patient data and
+            files names of the images
+        :param transform: UniformAugment object to perform augmentations
+        :param phase: which phase of training this is
+        "param external_base_dir: if external data is being used then this
+            is where the files will be found
+        """
+        assert phase in [
+            "train",
+            "valid",
+            "test",
+        ], "Phase must be one of 'train', 'valid', 'test'"
         self.base_dir = base_dir
         self.info = info_dataframe
         self.transform = transform
         self.phase = phase
+        self.external_base_dir = external_base_dir
 
     def __len__(self):
         return len(self.info)
 
-    def __getitem__(self, index):
-        p = Path(self.base_dir, self.info.loc[index, "image_name"] + ".jpg")
-        img = Image.open(p)
-        img_transformed = self.transform(img, self.phase)
-        if self.phase in ["train", "valid"]:
-            return {
-                "inputs": img_transformed,
-                "labels": torch.tensor(
-                    self.info.loc[index, "target"], dtype=torch.int64
-                ),
-            }
+    def __getitem__(self, index: int):
+        if self.external_base_dir != None:
+            if self.info.loc[index, "tfrecord"] > 15:
+                p = Path(
+                    self.external_base_dir, self.info.loc[index, "image_name"] + ".jpg"
+                )
+            else:
+                p = Path(self.base_dir, self.info.loc[index, "image_name"] + ".jpg")
         else:
-            return {
-                "inputs": img_transformed,
-            }
-
-
-class MelanomaDataset(Dataset):
-    def __init__(
-        self,
-        base_dir: str,
-        info_dataframe: pd.DataFrame,
-        transform=None,
-        phase: str = "train",
-        external: bool = False,
-    ):
-        self.base_dir = base_dir
-        self.info = info_dataframe
-        self.transform = transform
-        self.phase = phase
-
-    def __len__(self):
-        return len(self.info)
-
-    def __getitem__(self, index):
-        if self.phase == "test":
             p = Path(self.base_dir, self.info.loc[index, "image_name"] + ".jpg")
-        elif not self.info.loc[index, "tfrecord"] < 15:
-            p = Path(self.base_dir, self.info.loc[index, "image_name"] + ".jpg")
-        # If tfrecord is >=15 then this indicates data is external
-        else:
-            p = Path(
-                "../data/external/train", self.info.loc[index, "image_name"] + ".jpg"
-            )
         img = Image.open(p)
         img_transformed = self.transform(img, self.phase)
         if self.phase in ["train", "valid"]:
@@ -256,19 +251,33 @@ def format_tabular(
     """
     Takes in the dataframes containing all metadata and dummifies the categories and removes the
     filenames and patientnames before returning X and y to be fit
+    :param train_raw: dataframe of tabular training data
+    :param test_raw: dataframe same as above but missing target column, for testing
+    :param count: whether to include a column containing the number of times
+        each patient id occurs in the dataframe
     """
+    # Deal with NAs first
     train_raw.loc[:, "age_approx"].fillna(0, inplace=True)
     train_raw.loc[:, "anatom_site_general_challenge"].fillna("NA", inplace=True)
+
+    # Get just the columns wanted
     train = train_raw[["sex", "age_approx", "width", "height"]].copy()
+
+    # Convert the sex from categorical to numerical
     train["sex"] = train["sex"].apply(lambda x: 1.0 if x == "male" else 0.0)
     train.loc[:, "sex"].fillna(-1, inplace=True)
+
+    # Create dummy variables of other categorical columns
     train_dummies = pd.get_dummies(data=train_raw["anatom_site_general_challenge"])
     train = pd.concat([train, train_dummies], axis=1)
+
+    # Create the count column if asked for
     if count:
         train["patient_count"] = train_raw["patient_id"].map(
             train_raw["patient_id"].value_counts()
         )
 
+    # We do all the same for test set if it was given
     if type(test_raw) == pd.DataFrame:
         test_raw.loc[:, "age_approx"].fillna(0, inplace=True)
         test_raw.loc[:, "anatom_site_general_challenge"].fillna("NA", inplace=True)

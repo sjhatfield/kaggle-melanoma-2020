@@ -13,6 +13,8 @@ from typing import Union
 import time
 from tqdm import tqdm
 import pandas as pd
+import numpy as np
+from torch.utils.data.sampler import WeightedRandomSampler
 
 
 class AverageMeter:
@@ -284,3 +286,12 @@ def get_predictions(
         pred_test = pd.DataFrame(torch.softmax(pred_test, 1)[:, 1].numpy())
         predictions = pd.concat([predictions, pred_test], axis=1)
     return predictions
+
+
+def create_weighted_random_sampler(train: pd.DataFrame):
+    class_sample_count = np.array(
+        [len(np.where(train["target"] == t)[0]) for t in np.unique(train["target"])]
+    )
+    weight = 1.0 / class_sample_count
+    samples_weight = np.array([weight[t] for t in train["target"]])
+    return WeightedRandomSampler(samples_weight, len(samples_weight))
