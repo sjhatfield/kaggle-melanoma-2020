@@ -3,6 +3,7 @@ import sys
 sys.path.append("..")
 
 from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import RandomizedSearchCV
 from torchvision import models
 from efficientnet_pytorch import EfficientNet
 import torch
@@ -44,6 +45,18 @@ def load_model(model: str, out_features: int):
     Loads the model and sets the correct number of out
     features. Then requires gradients for all but the last 
     layer so that backpropogation can take place
+    :param model: name of the neural network architecture to be used
+        Here are the choices:
+            efficientnet-b0, efficientnet-b1, efficientnet-b2,
+            efficientnet-b3, efficientnet-b4, efficientnet-b5,
+            efficientnet-b6, efficientnet-b7
+            vgg19
+            resnext (this is resnext101_32x8d)
+            densenet (this is densenet161)
+            resnet18 (for local testing)
+            alexnet (for local testing)
+            
+    :param out_features: integer of out features. 2 for Kaggle contest
     """
     net = None
     if model.startswith("efficientnet"):
@@ -86,7 +99,7 @@ def load_model(model: str, out_features: int):
                 param.requires_grad = False
 
     # The next two are small networks for running locally. All
-    # others are too large to run locally
+    # others are too large to run locally unless image size is very small
 
     elif model == "resnet18":
         net = models.resnet18(pretrained=True)
@@ -166,7 +179,27 @@ def train_model(
     sampler: torch.utils.data.sampler,
     device: str = Union["cuda", "cpu"],
     early_stopping: int = 3,
-):
+) -> None:
+    """
+    :param model_id: A string naming the model (usually architecture with fold number)
+    :param dataset_train:
+    :param dataset_valid:
+    :param batch_size: number of images to be fed to model at a time
+    :param model: Result of load_model()
+    :param criterion: the loss function
+    :param optimizer:
+    :param scheduler: the learning rate schedule
+    :param num_epochs: total number of epochs for training
+    :param freezed_epochs: how many epochs to train the model with all but the final
+        layer frozen. We are using transfer learning so final layers need to be 
+        trained specifically to the new task
+    :param base_dir: location of the images
+    :param num_workers: number of cores to be used for image processing
+    :param sampler: how to sample the images to combat imbalance
+    :param device: "cpu" or "cuda"
+    :param early_stopping: if a better auc_valid score is not seen for this number
+        of epochs then training is stopped early
+    """
 
     model.to(device)
 
@@ -259,6 +292,9 @@ def train_model(
 
 
 def predict(dataset, batch_size, model, device=None):
+    """
+    Passes a batch of images through the network and gets their predictions
+    """
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     model.to(device)
     model.eval()
@@ -281,6 +317,17 @@ def get_predictions(
     predictions: pd.DataFrame,
     device: str = None,
 ):
+    """
+    Pass the images to be predicted through the network performing the given number
+    of test time augmentations (TTA). By augmenting the test images we average the 
+    errors in the test predicitons. Large errors get averaged to lower ones
+    :param dataset:
+    :param batch_size:
+    :param model:
+    :param test_time_augmentations: integer 1 or above
+    :param predicitons: dataframe for which predicitions will be appending to in rows
+    :param device: "cpu" or "cuda"
+    """
     for _ in tqdm(range(test_time_augmentations)):
         pred_test = predict(dataset, batch_size, model, device)
         pred_test = pd.DataFrame(torch.softmax(pred_test, 1)[:, 1].numpy())
@@ -288,10 +335,34 @@ def get_predictions(
     return predictions
 
 
-def create_weighted_random_sampler(train: pd.DataFrame):
+def create_weighted_random_sampler(train: pd.DataFrame) -> WeightedRandomSampler:
+    """
+    Self-explanatory
+    """
     class_sample_count = np.array(
         [len(np.where(train["target"] == t)[0]) for t in np.unique(train["target"])]
     )
     weight = 1.0 / class_sample_count
     samples_weight = np.array([weight[t] for t in train["target"]])
     return WeightedRandomSampler(samples_weight, len(samples_weight))
+
+
+def create_tabular_submission(
+    model: RandomizedSearchCV,
+    X_test: pd.DataFrame,
+    sample_path: str,
+    submission_name: str,
+) -> None:
+    """
+    Saves in a csv file the predicted probabilies of positive class
+    :param model: the model which is already fit
+    :param X_test: dataframe containing patient data already formatted
+    :param sample_path: this is where the sample submission provided by 
+        Kaggle is located. It is altered for our submission
+    :param submission_name: the name to be given the submission file
+    """
+    submission = pd.read_csv(sample_path)
+    predictions = model.predict_proba(X_test)
+    submission["target"] = predictions[:, 1]
+    submission.to_csv(f"../submissions/{submission_name}.csv", index=False)
+
