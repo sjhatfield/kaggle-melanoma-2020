@@ -142,14 +142,14 @@ class ImageTransform:
     def __init__(
         self,
         resize: int,
-        uniform_augment: UniformAugment,
+        uniform_augment: bool,
         mean: tuple = (0.485, 0.456, 0.406),  # ImageNet
         std: tuple = (0.229, 0.224, 0.225),  # ImageNet
         train: bool = True,
     ):
         """
         :param resize: integer giving the square side length in pixels of resized image
-        :param uniform_augment: above class of UniformAugment
+        :param uniform_augment: bool indicating where to use uniform augmentations
         :param mean: normalization mean where the default is ImageNet mean
         :param std: standard deviation where the defaulr is ImageNet
         :param train: bool indicating where this is a training dataset because validation
@@ -177,10 +177,21 @@ class ImageTransform:
                     transforms.Normalize(mean, std),
                 ]
             ),
+            "visualize_augmentations": transforms.Compose(
+                [
+                    transforms.RandomResizedCrop(size=resize, scale=(0.7, 1.0)),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.RandomVerticalFlip(),
+                    transforms.ToTensor(),
+                ]
+            ),
         }
         if uniform_augment:
             self.data_transform["train"].transforms.insert(0, UniformAugment())
             self.data_transform["test"].transforms.insert(0, UniformAugment())
+            self.data_transform["visualize_augmentations"].transforms.insert(
+                0, UniformAugment()
+            )
 
     def __call__(self, img: PIL.Image, phase: bool):
         # Performs the transformations of the image
@@ -210,7 +221,8 @@ class MelanomaDataset(Dataset):
             "train",
             "valid",
             "test",
-        ], "Phase must be one of 'train', 'valid', 'test'"
+            "visualize_augmentations",
+        ], "Phase must be one of 'train', 'valid', 'test', 'visualize_augmentations'"
         self.base_dir = base_dir
         self.info = info_dataframe
         self.transform = transform
