@@ -122,13 +122,14 @@ class UniformAugment:
         """
         operations = random.sample(list(self.augs.items()), self.operations)
         for operation in operations:
-            augmentation, range = operation
+            augmentation, the_range = operation
             # Uniformly select value from range of augmentations
-            magnitude = random.uniform(range[0], range[1])
+            magnitude = random.uniform(the_range[0], the_range[1])
             probability = random.random()
             # Perform augmentation uniformly at random
             if random.random() < probability:
                 img = self.func[augmentation](img, magnitude)
+                print(augmentation)
         return img
 
 
@@ -193,7 +194,7 @@ class ImageTransform:
                 0, UniformAugment()
             )
 
-    def __call__(self, img: PIL.Image, phase: bool):
+    def __call__(self, img: PIL.Image, phase: str):
         # Performs the transformations of the image
         return self.data_transform[phase](img=img)
 

@@ -30,4 +30,5 @@ def grid_augmentations_show(
         fig.add_subplot(rows, columns, i)
         image = sample[i - 1].numpy()
         plt.imshow(np.transpose(image, (1, 2, 0)), interpolation="nearest")
+        plt.title(f"Image {i}")
     return fig
